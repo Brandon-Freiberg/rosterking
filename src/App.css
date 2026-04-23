@@ -225,7 +225,8 @@ main {
 }
 
 .roster-table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 100%;
   font-size: 0.875rem;
 }
