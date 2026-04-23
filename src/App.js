@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import Roster from './Roster'
 import './App.css'
 
 function App() {
@@ -47,8 +48,7 @@ function App() {
           <button className="signout-btn" onClick={handleSignOut}>Sign out</button>
         </header>
         <main>
-          <p className="welcome">Welcome, {session.user.email}</p>
-          <p className="coming-soon">Roster dashboard coming soon...</p>
+          <Roster />
         </main>
       </div>
     )

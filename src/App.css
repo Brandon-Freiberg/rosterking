@@ -129,3 +129,83 @@ main {
   color: #475569;
   font-size: 0.875rem;
 }
+
+.loading {
+  padding: 2rem;
+  color: #94a3b8;
+}
+
+.roster-wrapper {
+  padding: 1.5rem 2rem;
+}
+
+.roster-wrapper h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1.25rem;
+  color: #e2e8f0;
+}
+
+.roster-scroll {
+  overflow-x: auto;
+}
+
+.roster-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 0.875rem;
+}
+
+.roster-table th {
+  background: #1e293b;
+  color: #94a3b8;
+  font-weight: 600;
+  padding: 0.6rem 1rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.roster-table th:first-child {
+  text-align: left;
+}
+
+.roster-table td {
+  border: 1px solid #1e293b;
+  padding: 0.5rem 1rem;
+  text-align: center;
+}
+
+.staff-name {
+  color: #e2e8f0;
+  font-weight: 500;
+  text-align: left !important;
+  white-space: nowrap;
+}
+
+.shift-cell {
+  cursor: pointer;
+  font-weight: 600;
+  min-width: 90px;
+}
+
+.shift-cell:hover {
+  opacity: 0.8;
+}
+
+.shift-cell.empty {
+  color: #334155;
+}
+
+.shift-cell.earlies {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.shift-cell.lates {
+  background: #3b1f5e;
+  color: #c4b5fd;
+}
+
+.shift-cell.days {
+  background: #1a3a2e;
+  color: #6ee7b7;
+}
