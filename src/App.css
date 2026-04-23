@@ -196,23 +196,33 @@ main {
 }
 
 .shift-cell.earlies {
+  background: #166534;
+  color: #dcfce7;
+}
+
+.shift-cell.lates {
+  background: #052e16;
+  color: #86efac;
+}
+
+.shift-cell.days {
+  background: #292011;
+  color: #e8d5a3;
+}
+
+.shift-cell.cover {
   background: #1e3a5f;
   color: #93c5fd;
 }
 
-.shift-cell.lates {
-  background: #3b1f5e;
-  color: #c4b5fd;
+.shift-cell.sick {
+  background: #2d2600;
+  color: #fde68a;
 }
 
-.shift-cell.days {
-  background: #1a3a2e;
-  color: #6ee7b7;
-}
-
-.shift-cell.cover {
-  background: #2d2a1a;
-  color: #fcd34d;
+.shift-cell.overtime {
+  background: #450a0a;
+  color: #fca5a5;
 }
 
 .team-header-row td {
@@ -223,4 +233,16 @@ main {
   letter-spacing: 0.08em;
   padding: 0.75rem 1rem 0.4rem;
   text-transform: uppercase;
+}
+
+.today-col {
+  border-bottom: 2px solid #6366f1;
+}
+
+th.today-col {
+  color: #a5b4fc;
+}
+
+.shift-cell.manual {
+  color: #f59e0b !important;
 }
