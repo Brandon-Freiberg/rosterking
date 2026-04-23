@@ -225,6 +225,21 @@ main {
   color: #fca5a5;
 }
 
+.shift-cell.leave-request {
+  background: #7c2d12;
+  color: #fdba74;
+}
+
+.shift-cell.approved-leave {
+  background: #831843;
+  color: #fbcfe8;
+}
+
+.shift-cell.training {
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+
 .team-header-row td {
   background: #0f172a;
   color: #6366f1;

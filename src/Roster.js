@@ -92,7 +92,8 @@ export default function Roster() {
     const teamTypes = [...shiftTypes.filter(t => t.team_id === teamId), ...globalTypes]
 
     const currentIndex = teamTypes.findIndex(t => t.name === current?.name)
-    const nextType = currentIndex < teamTypes.length - 1 ? teamTypes[currentIndex + 1] : null
+    const isLast = currentIndex === teamTypes.length - 1
+    const nextType = !isLast ? teamTypes[currentIndex + 1] : null
 
     const existing = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
 
@@ -107,6 +108,8 @@ export default function Roster() {
         setManualShifts(prev => [...prev, data])
       }
     } else {
+      // End of cycle — clear manual override
+      // Rostered days show pattern shift, rest days go blank
       if (existing) {
         await supabase.from('shifts').delete().eq('id', existing.id)
         setManualShifts(prev => prev.filter(s => s.id !== existing.id))
@@ -146,7 +149,7 @@ export default function Roster() {
                     <td className="staff-name">{person.name}</td>
                     {weekDates.map(d => {
                       const shift = getShift(person.id, d)
-                      const cellClass = shift ? shift.name.toLowerCase() : 'empty'
+                      const cellClass = shift ? shift.name.toLowerCase().replace(/\s+/g, '-') : 'empty'
                       return (
                         <td
                           key={formatDate(d)}
