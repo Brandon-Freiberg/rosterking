@@ -1,16 +1,30 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from './supabase'
 
-function getWeekDates() {
-  const dates = []
-  const today = new Date()
-  const monday = new Date(today)
-  monday.setDate(today.getDate() - today.getDay() + 1)
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday)
-    d.setDate(monday.getDate() + i)
-    dates.push(d)
+function getPeriodStart(view, baseDate = new Date()) {
+  const d = new Date(baseDate)
+  d.setHours(0, 0, 0, 0)
+  if (view === 'week' || view === '4weeks') {
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  } else if (view === 'month' || view === '3month') {
+    d.setDate(1)
+  } else if (view === 'year') {
+    d.setMonth(0, 1)
   }
+  return d
+}
+
+function getDateRange(view, periodStart) {
+  const dates = []
+  const start = new Date(periodStart)
+  let end
+  if (view === 'week')   { end = new Date(start); end.setDate(start.getDate() + 7) }
+  if (view === '4weeks') { end = new Date(start); end.setDate(start.getDate() + 28) }
+  if (view === 'month')  { end = new Date(start.getFullYear(), start.getMonth() + 1, 1) }
+  if (view === '3month') { end = new Date(start.getFullYear(), start.getMonth() + 3, 1) }
+  if (view === 'year')   { end = new Date(start.getFullYear() + 1, 0, 1) }
+  const cur = new Date(start)
+  while (cur < end) { dates.push(new Date(cur)); cur.setDate(cur.getDate() + 1) }
   return dates
 }
 
@@ -18,29 +32,81 @@ function formatDate(date) {
   return date.toISOString().split('T')[0]
 }
 
-function formatDisplay(date) {
-  return date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })
-}
-
 function isToday(date) {
-  const today = new Date()
-  return formatDate(date) === formatDate(today)
+  return formatDate(date) === formatDate(new Date())
 }
 
-const TEAM_ORDER = ['MOC Manager', 'Duty Managers', 'ATR Crew', 'DHC Crew', 'MOC Support']
+const DAY_LETTERS = ['S','M','T','W','T','F','S']
+
+function formatHeader(date, view) {
+  if (view === 'week') return date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })
+  const dayLetter = DAY_LETTERS[date.getDay()]
+  return <><span className="th-day-letter">{dayLetter}</span><span className="th-day-num">{date.getDate()}</span></>
+}
+
+function getMonthGroups(dateRange) {
+  const groups = []
+  dateRange.forEach(d => {
+    const key = `${d.getFullYear()}-${d.getMonth()}`
+    if (!groups.length || groups[groups.length - 1].key !== key) {
+      groups.push({ key, label: d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }), count: 1 })
+    } else {
+      groups[groups.length - 1].count++
+    }
+  })
+  return groups
+}
+
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const day = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+}
+
+function getPeriodLabel(view, periodStart, dateRange) {
+  if (!dateRange.length) return ''
+  const end = dateRange[dateRange.length - 1]
+  if (view === 'week') {
+    const wk = getISOWeek(periodStart)
+    const s = periodStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+    const e = end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+    return `Wk ${wk} — ${s} to ${e}`
+  }
+  if (view === '4weeks') {
+    const wk1 = getISOWeek(periodStart)
+    const wk2 = getISOWeek(end)
+    const s = periodStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+    const e = end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+    return `Wk ${wk1}–${wk2} — ${s} to ${e}`
+  }
+  if (view === 'month')  return periodStart.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+  if (view === '3month') return `${periodStart.toLocaleDateString('en-AU', { month: 'short' })} – ${end.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}`
+  if (view === 'year')   return String(periodStart.getFullYear())
+  return ''
+}
+
+const TEAM_ORDER  = ['MOC Manager', 'Duty Managers', 'ATR Crew', 'DHC Crew', 'MOC Support']
 const CODE_TO_NAME = { E: 'Earlies', L: 'Lates', D: 'Days', C: 'Cover' }
+const SHORT_CODES  = {
+  'Earlies': 'E', 'Lates': 'L', 'Days': 'D', 'Cover': 'C',
+  'Sick': 'S', 'Overtime': 'OT', 'Leave Request': 'LR', 'Approved Leave': 'AL', 'Training': 'T',
+}
 
 function getPatternShift(staffId, patternEntries, date) {
   const entries = patternEntries.filter(e => e.staff_id === staffId)
   if (!entries.length) return null
-
   const pattern = entries[0].patterns
   if (!pattern) return null
 
-  const startDate = new Date(pattern.start_date)
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000
-  const weeksElapsed = Math.floor((date - startDate) / msPerWeek)
-  const weekNumber = (weeksElapsed % pattern.cycle_weeks) + 1
+  // Compare calendar dates in UTC to avoid timezone/DST shifting week boundaries
+  const [sy, sm, sd] = pattern.start_date.split('-').map(Number)
+  const startUTC = Date.UTC(sy, sm - 1, sd)
+  const dateUTC  = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+
+  const weeksElapsed = Math.floor((dateUTC - startUTC) / (7 * 24 * 60 * 60 * 1000))
+  const weekNumber = ((weeksElapsed % pattern.cycle_weeks) + pattern.cycle_weeks) % pattern.cycle_weeks + 1
   const dayOfWeek = (date.getDay() + 6) % 7
 
   const entry = entries.find(e => e.week_number === weekNumber && e.day_of_week === dayOfWeek)
@@ -48,68 +114,87 @@ function getPatternShift(staffId, patternEntries, date) {
 }
 
 export default function Roster() {
-  const [teams, setTeams] = useState([])
-  const [staff, setStaff] = useState([])
-  const [shiftTypes, setShiftTypes] = useState([])
+  const [view, setView]               = useState('week')
+  const [periodStart, setPeriodStart] = useState(() => getPeriodStart('week'))
+  const [teams, setTeams]             = useState([])
+  const [staff, setStaff]             = useState([])
+  const [shiftTypes, setShiftTypes]   = useState([])
   const [patternEntries, setPatternEntries] = useState([])
-  const [manualShifts, setManualShifts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [manualShifts, setManualShifts]     = useState([])
+  const [loading, setLoading]         = useState(true)
 
-  const weekDates = getWeekDates()
+  const dateRange = useMemo(() => getDateRange(view, periodStart), [view, periodStart])
 
   useEffect(() => {
-    async function loadData() {
-      const [teamsRes, staffRes, shiftTypesRes, patternRes, shiftsRes] = await Promise.all([
+    async function loadStatic() {
+      const [teamsRes, staffRes, shiftTypesRes, patternRes] = await Promise.all([
         supabase.from('teams').select('*'),
         supabase.from('staff').select('*'),
         supabase.from('shift_types').select('*'),
         supabase.from('pattern_entries').select('*, patterns(cycle_weeks, start_date)'),
-        supabase.from('shifts').select('*').in('date', weekDates.map(formatDate)),
       ])
       setTeams(teamsRes.data || [])
       setStaff(staffRes.data || [])
       setShiftTypes(shiftTypesRes.data || [])
       setPatternEntries(patternRes.data || [])
-      setManualShifts(shiftsRes.data || [])
       setLoading(false)
     }
-    loadData()
+    loadStatic()
   }, [])
+
+  useEffect(() => {
+    if (!dateRange.length) return
+    async function loadShifts() {
+      const start = formatDate(dateRange[0])
+      const end   = formatDate(dateRange[dateRange.length - 1])
+      const { data } = await supabase.from('shifts').select('*').gte('date', start).lte('date', end)
+      setManualShifts(data || [])
+    }
+    loadShifts()
+  }, [dateRange])
+
+  function handleViewChange(newView) {
+    setPeriodStart(getPeriodStart(newView, periodStart))
+    setView(newView)
+  }
+
+  function navigate(direction) {
+    const d = new Date(periodStart)
+    if (view === 'week')   d.setDate(d.getDate() + direction * 7)
+    if (view === '4weeks') d.setDate(d.getDate() + direction * 28)
+    if (view === 'month')  d.setMonth(d.getMonth() + direction)
+    if (view === '3month') d.setMonth(d.getMonth() + direction * 3)
+    if (view === 'year')   d.setFullYear(d.getFullYear() + direction)
+    setPeriodStart(d)
+  }
 
   function getShift(staffId, date) {
     const manual = manualShifts.find(s => s.staff_id === staffId && s.date === formatDate(date))
     if (manual) {
       const shiftType = shiftTypes.find(t => t.id === manual.shift_type_id)
-      return shiftType ? { name: shiftType.name, manualId: manual.id, shiftTypeId: manual.shift_type_id, isManual: true } : null
+      return shiftType ? { name: shiftType.name, manualId: manual.id, isManual: true } : null
     }
     return getPatternShift(staffId, patternEntries, date)
   }
 
   async function cycleShift(staffId, teamId, date) {
-    const current = getShift(staffId, date)
-    const dateStr = formatDate(date)
+    const current   = getShift(staffId, date)
+    const dateStr   = formatDate(date)
     const globalTypes = shiftTypes.filter(t => t.team_id === null)
-    const teamTypes = [...shiftTypes.filter(t => t.team_id === teamId), ...globalTypes]
-
+    const teamTypes   = [...shiftTypes.filter(t => t.team_id === teamId), ...globalTypes]
     const currentIndex = teamTypes.findIndex(t => t.name === current?.name)
-    const isLast = currentIndex === teamTypes.length - 1
-    const nextType = !isLast ? teamTypes[currentIndex + 1] : null
-
-    const existing = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
+    const nextType     = currentIndex < teamTypes.length - 1 ? teamTypes[currentIndex + 1] : null
+    const existing     = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
 
     if (nextType) {
       if (existing) {
         await supabase.from('shifts').update({ shift_type_id: nextType.id }).eq('id', existing.id)
         setManualShifts(prev => prev.map(s => s.id === existing.id ? { ...s, shift_type_id: nextType.id } : s))
       } else {
-        const { data } = await supabase.from('shifts').insert({
-          staff_id: staffId, shift_type_id: nextType.id, date: dateStr,
-        }).select().single()
+        const { data } = await supabase.from('shifts').insert({ staff_id: staffId, shift_type_id: nextType.id, date: dateStr }).select().single()
         setManualShifts(prev => [...prev, data])
       }
     } else {
-      // End of cycle — clear manual override
-      // Rostered days show pattern shift, rest days go blank
       if (existing) {
         await supabase.from('shifts').delete().eq('id', existing.id)
         setManualShifts(prev => prev.filter(s => s.id !== existing.id))
@@ -123,14 +208,93 @@ export default function Roster() {
 
   return (
     <div className="roster-wrapper">
+      <div className="roster-controls">
+        <div className="view-selector">
+          {[
+            { key: 'week',   label: 'Week' },
+            { key: '4weeks', label: '4 Weeks' },
+            { key: 'month',  label: 'Month' },
+            { key: '3month', label: '3 Months' },
+            { key: 'year',   label: 'Year' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={`view-btn${view === key ? ' active' : ''}`}
+              onClick={() => handleViewChange(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="nav-controls">
+          <button className="nav-btn" onClick={() => navigate(-1)}>‹</button>
+
+          {(view === 'week' || view === '4weeks') && (
+            <span className="period-label">{getPeriodLabel(view, periodStart, dateRange)}</span>
+          )}
+
+          {(view === 'month' || view === '3month') && (
+            <>
+              <select
+                className="period-select"
+                value={periodStart.getMonth()}
+                onChange={e => { const d = new Date(periodStart); d.setMonth(+e.target.value); d.setDate(1); setPeriodStart(d) }}
+              >
+                {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
+                  <option key={i} value={i}>{m}</option>
+                ))}
+              </select>
+              <select
+                className="period-select"
+                value={periodStart.getFullYear()}
+                onChange={e => { const d = new Date(periodStart); d.setFullYear(+e.target.value); setPeriodStart(d) }}
+              >
+                {Array.from({ length: 10 }, (_, i) => 2025 + i).map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {view === 'year' && (
+            <select
+              className="period-select"
+              value={periodStart.getFullYear()}
+              onChange={e => setPeriodStart(new Date(+e.target.value, 0, 1))}
+            >
+              {Array.from({ length: 10 }, (_, i) => 2025 + i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          )}
+
+          <button className="nav-btn" onClick={() => navigate(1)}>›</button>
+        </div>
+      </div>
+
       <div className="roster-scroll">
-        <table className="roster-table">
+        <table className={`roster-table view-${view}`}>
           <thead>
+            {view !== 'week' && (
+              <tr>
+                <th className="name-col"></th>
+                {getMonthGroups(dateRange).map(g => (
+                  <th key={g.key} colSpan={g.count} className="month-group-header">{g.label}</th>
+                ))}
+              </tr>
+            )}
             <tr>
-              <th>Name</th>
-              {weekDates.map(d => (
-                <th key={formatDate(d)} className={isToday(d) ? 'today-col' : ''}>
-                  {formatDisplay(d)}
+              <th className="name-col">{view === 'week' ? 'Name' : ''}</th>
+              {dateRange.map(d => (
+                <th
+                  key={formatDate(d)}
+                  className={[
+                    isToday(d) ? 'today-col' : '',
+                    d.getDate() === 1 && view !== 'week' ? 'month-start' : '',
+                    d.getDay() === 1 && view !== 'week' && view !== '4weeks' ? 'week-start' : '',
+                  ].filter(Boolean).join(' ')}
+                >
+                  {formatHeader(d, view)}
                 </th>
               ))}
             </tr>
@@ -142,22 +306,32 @@ export default function Roster() {
                 .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
               return [
                 <tr key={`team-${team.id}`} className="team-header-row">
-                  <td colSpan={weekDates.length + 1}>{team.name}</td>
+                  <td colSpan={dateRange.length + 1}><span className="team-header-label">{team.name}</span></td>
                 </tr>,
                 ...teamStaff.map(person => (
                   <tr key={person.id}>
                     <td className="staff-name">{person.name}</td>
-                    {weekDates.map(d => {
+                    {dateRange.map(d => {
                       const shift = getShift(person.id, d)
                       const cellClass = shift ? shift.name.toLowerCase().replace(/\s+/g, '-') : 'empty'
+                      const content = view === 'week'
+                        ? (shift?.name ?? '—')
+                        : (shift ? (SHORT_CODES[shift.name] || shift.name[0]) : '')
                       return (
                         <td
                           key={formatDate(d)}
-                          className={`shift-cell ${cellClass}${shift?.isManual ? ' manual' : ''}${isToday(d) ? ' today-col' : ''}`}
+                          className={[
+                            'shift-cell',
+                            cellClass,
+                            shift?.isManual ? 'manual' : '',
+                            isToday(d) ? 'today-col' : '',
+                            d.getDate() === 1 && view !== 'week' ? 'month-start' : '',
+                            d.getDay() === 1 && view !== 'week' && view !== '4weeks' ? 'week-start' : '',
+                          ].filter(Boolean).join(' ')}
                           onClick={() => cycleShift(person.id, team.id, d)}
-                          title={shift?.isManual ? 'Manual override — click to cycle' : 'Pattern shift — click to override'}
+                          title={`${person.name} — ${d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}: ${shift?.name ?? 'Rest'}`}
                         >
-                          {shift ? shift.name : '—'}
+                          {content}
                         </td>
                       )
                     })}
