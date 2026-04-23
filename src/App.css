@@ -209,3 +209,18 @@ main {
   background: #1a3a2e;
   color: #6ee7b7;
 }
+
+.shift-cell.cover {
+  background: #2d2a1a;
+  color: #fcd34d;
+}
+
+.team-header-row td {
+  background: #0f172a;
+  color: #6366f1;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.75rem 1rem 0.4rem;
+  text-transform: uppercase;
+}
