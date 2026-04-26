@@ -91,8 +91,15 @@ const TEAM_ORDER  = ['MOC Manager', 'Duty Managers', 'ATR Crew', 'DHC Crew', 'MO
 const CODE_TO_NAME = { E: 'Earlies', L: 'Lates', D: 'Days', C: 'Cover' }
 const SHORT_CODES  = {
   'Earlies': 'E', 'Lates': 'L', 'Days': 'D', 'Cover': 'C',
-  'Sick': 'S', 'Overtime': 'OT', 'Leave Request': 'LR', 'Approved Leave': 'AL', 'Training': 'T',
+  'Sick': 'S', 'Overtime': 'OT', 'Overtime Earlies': 'OE', 'Overtime Lates': 'OL',
+  'Leave Request': 'LR', 'Approved Leave': 'AL', 'Training': 'T',
 }
+
+const WORKING_SHIFTS = new Set(['Earlies', 'Lates', 'Days', 'Cover', 'Overtime', 'Overtime Earlies', 'Overtime Lates'])
+const EARLY_SHIFTS   = new Set(['Earlies', 'Overtime Earlies'])
+const LATE_SHIFTS    = new Set(['Lates', 'Overtime Lates'])
+const ABSENCE_SHIFTS = new Set(['Sick', 'Leave Request', 'Approved Leave', 'Training'])
+
 
 function getPatternShift(staffId, patternEntries, date) {
   const entries = patternEntries.filter(e => e.staff_id === staffId)
@@ -122,8 +129,81 @@ export default function Roster() {
   const [patternEntries, setPatternEntries] = useState([])
   const [manualShifts, setManualShifts]     = useState([])
   const [loading, setLoading]         = useState(true)
+  const [activeCell, setActiveCell]   = useState(null) // { staffId, teamId, dateStr }
 
   const dateRange = useMemo(() => getDateRange(view, periodStart), [view, periodStart])
+
+  const manpowerByDate = useMemo(() => {
+    if (!teams.length || !staff.length || !shiftTypes.length) return {}
+    const dmTeam  = teams.find(t => t.name === 'Duty Managers')
+    const atrTeam = teams.find(t => t.name === 'ATR Crew')
+    const dhcTeam = teams.find(t => t.name === 'DHC Crew')
+    const campbell = staff.find(s => s.name.toLowerCase().includes('campbell'))
+    const dmStaff  = staff.filter(s => s.team_id === dmTeam?.id)
+    const atrStaff = staff.filter(s => s.team_id === atrTeam?.id)
+    const dhcStaff = staff.filter(s => s.team_id === dhcTeam?.id)
+    // deduplicated pool for shift-bucket counts
+    const mocPool = [...new Map(
+      [...atrStaff, ...dhcStaff, ...dmStaff, ...(campbell ? [campbell] : [])].map(s => [s.id, s])
+    ).values()]
+
+    const result = {}
+    dateRange.forEach(d => {
+      const dateStr = formatDate(d)
+      const getShiftName = (staffId) => {
+        const manual = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
+        if (manual) return shiftTypes.find(t => t.id === manual.shift_type_id)?.name || null
+        return getPatternShift(staffId, patternEntries, d)?.name || null
+      }
+      const working = (s) => { const n = getShiftName(s.id); return !!(n && WORKING_SHIFTS.has(n)) }
+
+      const dmWorking  = dmStaff.filter(working).length
+      const atrWorking = atrStaff.filter(working).length
+      const dhcWorking = dhcStaff.filter(working).length
+      const campbellWorking = campbell ? working(campbell) : false
+
+      const subs        = dmWorking + (campbellWorking ? 1 : 0)
+      const subsForAtr  = Math.min(subs, Math.max(0, 2 - atrWorking))
+      const subsForDhc  = Math.min(subs - subsForAtr, Math.max(0, 2 - dhcWorking))
+
+      let earlyCount = 0, lateCount = 0
+      mocPool.forEach(s => {
+        const n = getShiftName(s.id)
+        if (!n) return
+        if (EARLY_SHIFTS.has(n)) earlyCount++
+        if (LATE_SHIFTS.has(n)) lateCount++
+      })
+
+      result[dateStr] = {
+        dmCount: dmWorking,     dmOk: dmWorking >= 1,
+        atrCount: atrWorking,   atrEffective: atrWorking + subsForAtr,  atrOk: atrWorking + subsForAtr >= 2,
+        dhcCount: dhcWorking,   dhcEffective: dhcWorking + subsForDhc,  dhcOk: dhcWorking + subsForDhc >= 2,
+        earlyCount,             earlyOk: earlyCount >= 2,
+        lateCount,              lateOk: lateCount >= 2,
+      }
+    })
+    return result
+  }, [dateRange, manualShifts, patternEntries, staff, teams, shiftTypes])
+
+  const absencesByStaff = useMemo(() => {
+    const result = {}
+    staff.forEach(s => {
+      const typeCounts = {}
+      dateRange.forEach(d => {
+        const dateStr = formatDate(d)
+        const manual = manualShifts.find(ms => ms.staff_id === s.id && ms.date === dateStr)
+        const shiftName = manual
+          ? shiftTypes.find(t => t.id === manual.shift_type_id)?.name
+          : getPatternShift(s.id, patternEntries, d)?.name
+        if (!shiftName || !ABSENCE_SHIFTS.has(shiftName)) return
+        // Ignore training on a rostered rest day
+        if (shiftName === 'Training' && !getPatternShift(s.id, patternEntries, d)) return
+        typeCounts[shiftName] = (typeCounts[shiftName] || 0) + 1
+      })
+      if (Object.keys(typeCounts).length) result[s.id] = typeCounts
+    })
+    return result
+  }, [dateRange, manualShifts, patternEntries, staff, shiftTypes])
 
   useEffect(() => {
     async function loadStatic() {
@@ -177,28 +257,24 @@ export default function Roster() {
     return getPatternShift(staffId, patternEntries, date)
   }
 
-  async function cycleShift(staffId, teamId, date) {
-    const current   = getShift(staffId, date)
-    const dateStr   = formatDate(date)
-    const globalTypes = shiftTypes.filter(t => t.team_id === null)
-    const teamTypes   = [...shiftTypes.filter(t => t.team_id === teamId), ...globalTypes]
-    const currentIndex = teamTypes.findIndex(t => t.name === current?.name)
-    const nextType     = currentIndex < teamTypes.length - 1 ? teamTypes[currentIndex + 1] : null
-    const existing     = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
+  async function selectShift(staffId, teamId, dateStr, shiftTypeId) {
+    setActiveCell(null)
+    const existing = manualShifts.find(s => s.staff_id === staffId && s.date === dateStr)
 
-    if (nextType) {
-      if (existing) {
-        await supabase.from('shifts').update({ shift_type_id: nextType.id }).eq('id', existing.id)
-        setManualShifts(prev => prev.map(s => s.id === existing.id ? { ...s, shift_type_id: nextType.id } : s))
-      } else {
-        const { data } = await supabase.from('shifts').insert({ staff_id: staffId, shift_type_id: nextType.id, date: dateStr }).select().single()
-        setManualShifts(prev => [...prev, data])
-      }
-    } else {
+    if (!shiftTypeId) {
       if (existing) {
         await supabase.from('shifts').delete().eq('id', existing.id)
         setManualShifts(prev => prev.filter(s => s.id !== existing.id))
       }
+      return
+    }
+
+    if (existing) {
+      await supabase.from('shifts').update({ shift_type_id: shiftTypeId }).eq('id', existing.id)
+      setManualShifts(prev => prev.map(s => s.id === existing.id ? { ...s, shift_type_id: shiftTypeId } : s))
+    } else {
+      const { data } = await supabase.from('shifts').insert({ staff_id: staffId, shift_type_id: shiftTypeId, date: dateStr }).select().single()
+      setManualShifts(prev => [...prev, data])
     }
   }
 
@@ -304,22 +380,41 @@ export default function Roster() {
               const teamStaff = staff
                 .filter(s => s.team_id === team.id)
                 .sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
+              const mpKey = team.name === 'Duty Managers' ? 'dm'
+                : team.name === 'ATR Crew' ? 'atr'
+                : team.name === 'DHC Crew' ? 'dhc'
+                : null
+              const mpLabel = team.name === 'Duty Managers' ? '≥1 DM'
+                : team.name === 'ATR Crew' ? '≥2 ATR'
+                : team.name === 'DHC Crew' ? '≥2 DHC'
+                : null
+              const mpNeed = team.name === 'Duty Managers' ? 1 : 2
+
               return [
                 <tr key={`team-${team.id}`} className="team-header-row">
                   <td colSpan={dateRange.length + 1}><span className="team-header-label">{team.name}</span></td>
                 </tr>,
                 ...teamStaff.map(person => (
                   <tr key={person.id}>
-                    <td className="staff-name">{person.name}</td>
+                    <td className="staff-name">
+                      <span className="staff-name-text">{person.name}</span>
+                      {absencesByStaff[person.id] && Object.entries(absencesByStaff[person.id]).map(([type, count]) => (
+                        <span key={type} className="absence-count">{count} {type.toLowerCase()}</span>
+                      ))}
+                    </td>
                     {dateRange.map(d => {
+                      const dateStr = formatDate(d)
                       const shift = getShift(person.id, d)
                       const cellClass = shift ? shift.name.toLowerCase().replace(/\s+/g, '-') : 'empty'
                       const content = view === 'week'
                         ? (shift?.name ?? '—')
                         : (shift ? (SHORT_CODES[shift.name] || shift.name[0]) : '')
+                      const isActive = activeCell?.staffId === person.id && activeCell?.dateStr === dateStr
+                      const teamTypes = [...shiftTypes.filter(t => t.team_id === team.id), ...shiftTypes.filter(t => t.team_id === null)]
+                      const currentTypeId = shift ? (shiftTypes.find(t => t.name === shift.name)?.id ?? '') : ''
                       return (
                         <td
-                          key={formatDate(d)}
+                          key={dateStr}
                           className={[
                             'shift-cell',
                             cellClass,
@@ -327,16 +422,84 @@ export default function Roster() {
                             isToday(d) ? 'today-col' : '',
                             d.getDate() === 1 && view !== 'week' ? 'month-start' : '',
                             d.getDay() === 1 && view !== 'week' && view !== '4weeks' ? 'week-start' : '',
+                            isActive ? 'cell-active' : '',
                           ].filter(Boolean).join(' ')}
-                          onClick={() => cycleShift(person.id, team.id, d)}
+                          onClick={() => setActiveCell(isActive ? null : { staffId: person.id, teamId: team.id, dateStr })}
                           title={`${person.name} — ${d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}: ${shift?.name ?? 'Rest'}`}
                         >
-                          {content}
+                          {isActive ? (
+                            <select
+                              className="shift-select"
+                              autoFocus
+                              defaultValue={currentTypeId}
+                              onBlur={() => setActiveCell(null)}
+                              onChange={e => selectShift(person.id, team.id, dateStr, e.target.value || null)}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <option value="">— Rest —</option>
+                              {teamTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+                          ) : content}
                         </td>
                       )
                     })}
                   </tr>
-                ))
+                )),
+                (() => {
+                  const teamTotals = {}
+                  teamStaff.forEach(s => {
+                    const abs = absencesByStaff[s.id]
+                    if (!abs) return
+                    Object.entries(abs).forEach(([type, count]) => {
+                      teamTotals[type] = (teamTotals[type] || 0) + count
+                    })
+                  })
+                  const total = Object.values(teamTotals).reduce((a, b) => a + b, 0)
+                  if (!total) return null
+                  const summary = Object.entries(teamTotals)
+                    .map(([type, count]) => `${count} ${type.toLowerCase()}`)
+                    .join(', ')
+                  return (
+                    <tr key={`totals-${team.id}`} className="team-totals-row">
+                      <td className="staff-name team-totals-label">{summary}</td>
+                      {dateRange.map(d => <td key={formatDate(d)} className="team-totals-cell" />)}
+                    </tr>
+                  )
+                })(),
+                mpKey && (
+                  <tr key={`mp-${team.id}`} className="manpower-row">
+                    <td className="staff-name manpower-label">{mpLabel}</td>
+                    {dateRange.map(d => {
+                      const dateStr = formatDate(d)
+                      const mp = manpowerByDate[dateStr]
+                      if (!mp) return <td key={dateStr} />
+                      const headcountOk = mp[`${mpKey}Ok`]
+                      const ok = mpKey === 'dm'
+                        ? headcountOk
+                        : headcountOk && mp.earlyOk && mp.lateOk
+                      const eff = mpKey === 'dm' ? mp.dmCount : mp[`${mpKey}Effective`]
+                      const issues = []
+                      if (!headcountOk) issues.push(`${eff}/${mpNeed} on shift`)
+                      if (mpKey !== 'dm' && !mp.earlyOk) issues.push(`Earlies: ${mp.earlyCount}/2`)
+                      if (mpKey !== 'dm' && !mp.lateOk)  issues.push(`Lates: ${mp.lateCount}/2`)
+                      return (
+                        <td
+                          key={dateStr}
+                          className={[
+                            'manpower-cell',
+                            ok ? 'manpower-ok' : 'manpower-fail',
+                            isToday(d) ? 'today-col' : '',
+                            d.getDate() === 1 && view !== 'week' ? 'month-start' : '',
+                            d.getDay() === 1 && view !== 'week' && view !== '4weeks' ? 'week-start' : '',
+                          ].filter(Boolean).join(' ')}
+                          title={ok ? `${eff}/${mpNeed}` : issues.join(', ')}
+                        >
+                          {ok ? '' : '!'}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ),
               ]
             })}
           </tbody>

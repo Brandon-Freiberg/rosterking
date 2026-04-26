@@ -266,6 +266,33 @@ main {
   z-index: 1;
 }
 
+.staff-name-text {
+  display: block;
+}
+
+.absence-count {
+  color: #f87171;
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+.team-totals-row td {
+  border-top: none;
+  padding-top: 0;
+}
+
+.team-totals-label {
+  color: #94a3b8 !important;
+  font-size: 0.7rem !important;
+  font-weight: 400 !important;
+}
+
+.team-totals-cell {
+  border: none;
+}
+
 .shift-cell {
   cursor: pointer;
   font-weight: 600;
@@ -323,6 +350,18 @@ main {
 .shift-cell.training {
   background: #1e3a8a;
   color: #bfdbfe;
+}
+
+.shift-cell.overtime-earlies {
+  background: #14532d;
+  color: #a7f3d0;
+  border: 1px solid #166534;
+}
+
+.shift-cell.overtime-lates {
+  background: #042f2e;
+  color: #99f6e4;
+  border: 1px solid #134e4a;
 }
 
 .team-header-row td {
@@ -415,4 +454,49 @@ th.today-col {
 
 .month-start {
   border-left: 2px solid #64748b;
+}
+
+.shift-cell.cell-active {
+  outline: 2px solid #6366f1;
+  outline-offset: -2px;
+}
+
+.manpower-row td {
+  border-top: none;
+  padding-bottom: 0.5rem;
+}
+
+.manpower-label {
+  color: #475569 !important;
+  font-size: 0.7rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em;
+}
+
+.manpower-cell {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.manpower-ok {
+  color: transparent;
+}
+
+.manpower-fail {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.shift-select {
+  background: #0f172a;
+  border: none;
+  border-radius: 4px;
+  color: #f1f5f9;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  max-width: 100%;
+  padding: 0.1rem 0.2rem;
+  width: 100%;
 }
